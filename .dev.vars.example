@@ -1,0 +1,11 @@
+# WordPress MCP — local dev secrets
+# Copy this file to .dev.vars and fill in your actual credentials (gitignored)
+
+# Shared secret ClickUp Brain sends in the X-API-Key header
+# Provisioned via Doppler (cs-shared/prd), synced to this Worker's Cloudflare secrets in production
+API_KEY=your_api_key_here
+
+# Supabase project that holds wp_credentials (client_slug -> site_url/username/token/seo_plugin/elementor)
+# Same project used by contractor-scale/skills/wordpress — Doppler project cs-shared, config dev/prd
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SECRET_KEY=your_supabase_secret_key_here
