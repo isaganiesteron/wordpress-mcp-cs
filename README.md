@@ -26,7 +26,7 @@ Brain had the WordPress Connector *skill* (knowledge of how to structure WP REST
 | `wp_publish_post` | Create a post — `status: "draft"` \| `"publish"` \| `"future"` (+ `date`) for scheduling |
 | `wp_update_post` | Update an existing post's content, status, slug, or scheduled date |
 | `wp_set_featured_image` | Fetch an image from a URL, upload it to the site's media library, and assign it as a post's featured image |
-| `wp_set_seo_meta` | Set RankMath SEO title/description/focus keyword on a post (requires RankMath's `show_in_rest` enabled for those meta keys on the target site) |
+| `wp_set_seo_meta` | Set RankMath SEO title/description/focus keyword on a post. Rejects non-RankMath sites server-side (checks `wp_credentials.seo_plugin`) before making any WP call; also requires RankMath's `show_in_rest` enabled for those meta keys on the target site |
 | `wp_raw_request` | Escape hatch for anything not covered above (e.g. `DELETE /wp-json/elementor/v1/cache`) — logs a warning so recurring use can graduate to a dedicated tool |
 
 Every tool except `wp_list_clients` takes a `client` argument (the `wp_credentials.client_slug`).
@@ -148,7 +148,7 @@ This mirrors `contractor-scale/skills/wordpress/scripts/_wp.js` — same table, 
 
 ## Known Risks / Things to Verify Per-Site
 
-- **RankMath meta over REST depends on `show_in_rest`** being registered for `rank_math_title`/`rank_math_description`/`rank_math_focus_keyword` on that specific site. Confirmed working on at least one site in production; not guaranteed across all 54+.
+- **RankMath meta over REST depends on `show_in_rest`** being registered for `rank_math_title`/`rank_math_description`/`rank_math_focus_keyword` on that specific site. Confirmed working on at least one site in production; not guaranteed across all 54+. (`wp_set_seo_meta` does enforce `seo_plugin === 'rankmath'` server-side, but can't verify `show_in_rest` without attempting the write.)
 - **Redirects are out of scope** — RankMath/Yoast expose no REST redirect route; that's handled separately by `contractor-scale/skills/wordpress/scripts/wp-redirect.js` via the Redirection plugin.
 - First request to a given client's live site through a cold Worker isolate can take 10-25s (TLS/DNS through the Workers runtime) — a retry succeeds quickly. Not a bug, just latency to expect on the first call after a deploy.
 
