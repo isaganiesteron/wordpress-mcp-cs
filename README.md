@@ -1,501 +1,184 @@
-# TypingMind MCP Cloudflare Starter
+# WordPress MCP Server
 
-A production-ready starter template for building Model Context Protocol (MCP) servers on Cloudflare Workers, specifically designed for TypingMind integration. This template provides both SSE (Server-Sent Events) and Streamable HTTP transport support, proper CORS handling, and a clean architecture for adding custom tools.
+A Model Context Protocol (MCP) server that gives ClickUp Brain direct execution access to WordPress — publishing, scheduling, and updating posts, setting featured images, and writing RankMath SEO meta — across every Contractor Scale client site, without relaying through Donna.
+
+Runs on Cloudflare Workers, following the same architecture as the sibling MCPs in this fleet (`google-ads-mcp-cs`, `meta-ads-mcp-cs`, `gsc-mcp-cs`): a single-file Worker, dual SSE/streamable-HTTP transport, static API-key auth, in-memory session map.
+
+## Why this exists
+
+Brain had the WordPress Connector *skill* (knowledge of how to structure WP REST calls) but no execution path of its own — every publish/update request had to be delegated to Donna via the Donna MCP, which introduced stale credential-path bugs and premature "blocked on credentials" messages before Donna even attempted execution. This Worker gives Brain the same publish/edit/schedule capability Donna has, in one loop. See [OPERATIONS-11119](https://app.clickup.com/t/6942940/OPERATIONS-11119).
 
 ## Features
 
-- **Dual Transport Support**: SSE (`/sse`) and Streamable HTTP (`/mcp`) transports — clients can use whichever they prefer
-- **Cloudflare Workers**: Serverless deployment with global edge network
-- **TypeScript**: Full type safety and excellent developer experience
-- **Modular Tools**: Easy-to-extend tool system with clear separation of concerns
-- **Production Ready**: Includes error handling, CORS, health checks, and session management
-- **TypingMind Compatible**: Tested and working with TypingMind MCP integration
-- **Postman Collection**: Ready-to-use API testing collection with local and production environments
+- **8 WordPress tools** covering publish/schedule, update, list/query, featured images, RankMath SEO meta, and a raw-request escape hatch (see [Available Tools](#available-tools))
+- **Supabase-backed multi-tenant credentials** — reads `wp_credentials` per `client_slug` (54+ client sites), the same table and application-password auth model as `contractor-scale/skills/wordpress`
+- **Dual Transport**: SSE (`/sse`) and Streamable HTTP (`/mcp`) — ClickUp Brain connects via `/mcp`
+- **Cloudflare Workers**: Serverless, global edge network
+- **Fail-closed credential resolution**: a client with no stored application password errors clearly instead of hanging or silently succeeding
 
-## Quick Start
+## Available Tools
 
-### 1. Fork this repository
+| Tool | Purpose |
+|---|---|
+| `wp_list_clients` | List every client site configured in Supabase `wp_credentials` (no secrets returned) |
+| `wp_list_posts` | Query posts on a client site by status, search term, or slug |
+| `wp_get_post` | Get a single post by ID (e.g. to confirm a publish/update landed) |
+| `wp_publish_post` | Create a post — `status: "draft"` \| `"publish"` \| `"future"` (+ `date`) for scheduling |
+| `wp_update_post` | Update an existing post's content, status, slug, or scheduled date |
+| `wp_set_featured_image` | Fetch an image from a URL, upload it to the site's media library, and assign it as a post's featured image |
+| `wp_set_seo_meta` | Set RankMath SEO title/description/focus keyword on a post (requires RankMath's `show_in_rest` enabled for those meta keys on the target site) |
+| `wp_raw_request` | Escape hatch for anything not covered above (e.g. `DELETE /wp-json/elementor/v1/cache`) — logs a warning so recurring use can graduate to a dedicated tool |
 
-Click the "Fork" button on GitHub to create your own copy of this template.
+Every tool except `wp_list_clients` takes a `client` argument (the `wp_credentials.client_slug`).
 
-### 2. Clone your fork
+## Getting Started
+
+### 1. Prerequisites
+
+- Node.js 18+ and npm
+- A Cloudflare account with Workers enabled
+- Access to the `cs-shared` Doppler project (for `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`)
+
+### 2. Clone and install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/your-mcp-server.git
-cd your-mcp-server
-```
-
-### 3. Install dependencies
-
-```bash
+git clone https://github.com/isaganiesteron/wordpress-mcp-cs.git
+cd wordpress-mcp-cs
 npm install
 ```
 
-### 4. Customize your MCP server
-
-Open `src/index.ts` and modify:
-
-**a. Update the CONFIG section** (lines 6-12):
-
-```typescript
-const CONFIG = {
-	serverName: 'your-mcp-name', // Update with your server name
-	serverVersion: '1.0.0', // Your version
-	serverDescription: 'Your MCP Server', // Description
-	protocolVersion: '2024-11-05', // MCP protocol version
-	keepAliveInterval: 30000, // SSE keep-alive interval (ms)
-} as const;
-```
-
-**b. Update package.json**:
-
-```json
-{
-	"name": "your-mcp-name",
-	"version": "1.0.0",
-	...
-}
-```
-
-**c. Set up wrangler.jsonc**:
-
-First, copy the example file:
+### 3. Configure local secrets
 
 ```bash
 cp wrangler.jsonc.example wrangler.jsonc
+cp .dev.vars.example .dev.vars
 ```
 
-Then update `wrangler.jsonc`:
+Fill in `.dev.vars` with real values (never commit this file — it's gitignored):
 
-```jsonc
-{
-	"name": "your-mcp-name",  // This becomes your worker's name
-	...
-}
+```
+API_KEY=<any local test value>
+SUPABASE_URL=<from Doppler cs-shared/dev>
+SUPABASE_SECRET_KEY=<Doppler's SUPABASE_SERVICE_ROLE_KEY value>
 ```
 
-### 5. Add your custom tools
+Pull real values without ever printing them, if Doppler CLI is set up:
 
-Replace the example tools in the `TOOLS` array (lines 44-88 in `src/index.ts`):
-
-```typescript
-const TOOLS: Tool[] = [
-	{
-		name: 'your_tool_name',
-		description: 'What your tool does',
-		inputSchema: {
-			type: 'object',
-			properties: {
-				param1: { type: 'string', description: 'First parameter' },
-				param2: { type: 'number', description: 'Second parameter' },
-			},
-			required: ['param1'],
-		},
-		handler: async (args) => {
-			// Your tool logic here
-			const result = doSomething(args.param1, args.param2);
-
-			return {
-				content: [
-					{
-						type: 'text',
-						text: `Result: ${result}`,
-					},
-				],
-			};
-		},
-	},
-	// Add more tools here...
-];
+```bash
+doppler run --project cs-shared --config dev -- <write env vars to .dev.vars>
 ```
 
-### 6. Test locally
+### 4. Test locally
 
 ```bash
 npm run dev
 ```
 
-Your server will be available at `http://localhost:8787`
-
-Test the health endpoint:
-
 ```bash
-curl http://localhost:8787
+curl http://localhost:8787/
 ```
 
-### 7. Deploy to Cloudflare Workers
+### 5. Deploy to Cloudflare Workers
 
 ```bash
 npm run deploy
 ```
 
-After deployment, Cloudflare will provide your worker URL (e.g., `https://typingmind-mcp-cloudflare-starter.YOUR_SUBDOMAIN.workers.dev`)
-
-## Using with TypingMind
-
-1. Deploy your MCP server to Cloudflare Workers
-2. In TypingMind, go to Settings → MCP Servers
-3. Add a new server using either transport:
-
-   **Option A — Streamable HTTP (recommended for newer clients):**
-   - **Name**: Your MCP Server
-   - **URL**: `https://typingmind-mcp-cloudflare-starter.YOUR_SUBDOMAIN.workers.dev/mcp`
-   - **Transport**: Streamable HTTP
-
-   **Option B — SSE:**
-   - **Name**: Your MCP Server
-   - **URL**: `https://typingmind-mcp-cloudflare-starter.YOUR_SUBDOMAIN.workers.dev/sse`
-   - **Transport**: SSE
-
-4. Test the connection
-
-## API Key Authentication
-
-This template includes optional API key authentication to secure your MCP server.
-
-### Setup
-
-1. **Set the API key secret** (recommended for production):
-
-   ```bash
-   wrangler secret put API_KEY
-   ```
-
-   Enter your API key when prompted.
-
-2. **Configure authentication** in `src/index.ts`:
-   ```typescript
-   const CONFIG = {
-   	// ... other config ...
-   	requireApiKey: true, // Set to false to disable
-   	apiKeyHeader: 'X-API-Key', // or 'Authorization' for Bearer tokens
-   };
-   ```
-
-### Usage
-
-Include the API key in your requests:
-
-**Using X-API-Key header:**
+`SUPABASE_URL` / `SUPABASE_SECRET_KEY` are synced automatically to the deployed Worker by the centralized pipeline in the `contractor-scale` repo (`tools/scripts/maintenance/sync-doppler-to-cloudflare-worker.js`, `TARGETS.wordpress-mcp`) on a daily cron + Doppler webhook. **`API_KEY` is never auto-synced** (by design, per that script's `NEVER_AUTO` set — it's a unique per-worker secret) and must be set once manually:
 
 ```bash
-curl -H "X-API-Key: your-api-key-here" https://your-worker.workers.dev/sse
+wrangler secret put API_KEY
 ```
 
-**Using Authorization header (Bearer token):**
+> If you set `API_KEY` and then the sync script runs `wrangler@3 secret bulk` for the Supabase keys, re-verify `API_KEY` still authenticates afterward — during this Worker's initial deploy, that sequence caused `API_KEY` to briefly stop resolving until it was re-set with `wrangler@4`. Only seen once; flagged here in case it recurs.
 
-```typescript
-// In src/index.ts, set: apiKeyHeader: 'Authorization'
-// Then use:
-curl -H "Authorization: Bearer your-api-key-here" https://your-worker.workers.dev/sse
-```
+## Using with ClickUp Brain
 
-### Disabling Authentication
-
-To disable API key requirement (not recommended for production):
-
-```typescript
-const CONFIG = {
-	requireApiKey: false,
-	// ...
-};
-```
-
-**Note:** The health check endpoint (`/`) does not require authentication.
+1. Deploy this Worker (above)
+2. In ClickUp, go to **App Center → MCP Servers → Connect an MCP Server**
+3. Fill in:
+   - **Name**: `WordPress MCP`
+   - **URL**: `https://wordpress-mcp.isagani.workers.dev/mcp` — use `/mcp`, not `/sse`. Brain's setup flow does a GET that expects a response to fully complete; `/sse` holds the connection open indefinitely (that's correct SSE behavior, but it reads as a stuck/hung setup in the UI).
+   - **Authentication Method**: if there's no direct "API Key" option, use **Custom Headers** with header name `X-API-Key` and the deployed `API_KEY` value
+4. Run the smoke test in [TEST_PROMPT.md](./TEST_PROMPT.md)
 
 ## Project Structure
 
 ```
 .
 ├── src/
-│   └── index.ts          # Main MCP server code
+│   └── index.ts          # Entire MCP server: config, Supabase/WP helpers, tools, framework code
 ├── test/
-│   └── index.spec.ts     # Tests
-├── postman/              # Postman collection for API testing
-│   ├── MCP Server.postman_collection.json
-│   ├── Local.postman_environment.json
-│   ├── Production.postman_environment.json
-│   └── README.md
-├── TEST_PROMPT.md        # Test prompts for TypingMind integration testing
-├── wrangler.jsonc.example  # Example Cloudflare Workers config (copy to wrangler.jsonc)
-├── wrangler.jsonc        # Cloudflare Workers config (gitignored, create from example)
-├── package.json          # Dependencies and scripts
-├── tsconfig.json         # TypeScript config
-└── README.md             # This file
+│   └── index.spec.ts     # Vitest (currently the stock starter test — needs real coverage)
+├── postman/               # Postman collection (currently the starter's example-tool requests)
+├── TEST_PROMPT.md         # WordPress MCP smoke test prompts (for ClickUp Brain or manual curl)
+├── wrangler.jsonc.example # Copy to wrangler.jsonc (gitignored)
+├── .dev.vars.example      # Copy to .dev.vars (gitignored) — API_KEY, SUPABASE_URL, SUPABASE_SECRET_KEY
+├── package.json
+├── tsconfig.json
+└── README.md
 ```
 
 ## API Endpoints
 
 ### Health check
 
-- `GET /` - Returns server info and the list of available transport endpoints (no API key required)
+- `GET /` — server info + available transport endpoints (no API key required)
 
-### SSE transport
+### Streamable HTTP transport (`/mcp`) — what ClickUp Brain uses
 
-- `GET /sse` - Establishes an SSE connection; responds with an `endpoint` event containing the session-specific message URL
-- `POST /sse` - Direct HTTP fallback (for clients that don't open an SSE stream)
-- `POST /sse/message?sessionId={id}` - Sends a JSON-RPC message on an active SSE session
+- `POST /mcp` — JSON-RPC message. On `initialize`, the server mints a session ID and returns it in the `Mcp-Session-Id` response header; subsequent requests must include that header.
+- `DELETE /mcp` — terminate a session (header shape-validated only, not persisted server-side)
 
-### Streamable HTTP transport (`/mcp`)
+### SSE transport (`/sse`)
 
-- `POST /mcp` — Send a JSON-RPC message. On an `initialize` request the server generates a new session ID and returns it in the `Mcp-Session-Id` response header. All subsequent requests must include that header.
-- `DELETE /mcp` — Terminate a session. Requires a valid `Mcp-Session-Id` header; returns `200` on success or `404` if the header is missing/invalid.
+- `GET /sse` — opens an SSE stream, emits an `endpoint` event with the session-specific message URL, then keeps the connection open with a 30s keepalive ping
+- `POST /sse` — direct HTTP fallback (no open stream)
+- `POST /sse/message?sessionId={id}` — send a JSON-RPC message on an active SSE session
 
-**Session flow for `/mcp`:**
+## Credential Resolution
 
-```
-1. POST /mcp  { method: "initialize", ... }
-   ← 200  Mcp-Session-Id: <uuid>   + initialize result
+Every tool (except `wp_list_clients`) calls `resolveClient(client, env)`, which:
 
-2. POST /mcp  { method: "tools/list", ... }
-   → Mcp-Session-Id: <uuid>
-   ← 200  tools list
+1. Queries Supabase `wp_credentials` for the given `client_slug` via PostgREST (`env.SUPABASE_URL` / `env.SUPABASE_SECRET_KEY`)
+2. Fails closed with a clear error if no row exists, `auth_type` isn't `application_password`, or no token is stored
+3. Builds a `Basic` auth header (`btoa(username:token)`, spaces stripped from the displayed application password) for the site's own `/wp-json/...` REST API
 
-3. DELETE /mcp
-   → Mcp-Session-Id: <uuid>
-   ← 200
-```
+This mirrors `contractor-scale/skills/wordpress/scripts/_wp.js` — same table, same auth model, same fail-closed error messages — just reading from Worker secrets instead of `process.env`, with no local-file fallback (Workers have no filesystem).
 
-## Tool Development Guide
+## Known Risks / Things to Verify Per-Site
 
-### Tool Interface
-
-Each tool must implement the `Tool` interface:
-
-```typescript
-interface Tool {
-	name: string; // Unique tool identifier
-	description: string; // What the tool does
-	inputSchema: {
-		// JSON Schema for input validation
-		type: string;
-		properties: Record<string, { type: string; description: string }>;
-		required: string[];
-	};
-	handler: (args: Record<string, unknown>) => Promise<ToolResult> | ToolResult;
-}
-```
-
-### Tool Handler
-
-The handler function receives the arguments and must return a `ToolResult`:
-
-```typescript
-interface ToolResult {
-	content: Array<{
-		type: string; // Usually 'text'
-		text: string; // The response text
-	}>;
-}
-```
-
-### Example Tool with Error Handling
-
-```typescript
-{
-	name: 'fetch_data',
-	description: 'Fetches data from an API',
-	inputSchema: {
-		type: 'object',
-		properties: {
-			endpoint: { type: 'string', description: 'API endpoint to call' },
-		},
-		required: ['endpoint'],
-	},
-	handler: async (args) => {
-		try {
-			const response = await fetch(args.endpoint as string);
-			const data = await response.json();
-
-			return {
-				content: [
-					{
-						type: 'text',
-						text: JSON.stringify(data, null, 2),
-					},
-				],
-			};
-		} catch (error) {
-			throw new Error(`Failed to fetch data: ${error.message}`);
-		}
-	},
-}
-```
-
-### Using Cloudflare Workers Features
-
-You can use all Cloudflare Workers features in your tools:
-
-```typescript
-// KV Storage (requires binding in wrangler.jsonc)
-handler: async (args, env) => {
-	await env.MY_KV.put('key', 'value');
-	const value = await env.MY_KV.get('key');
-	// ...
-};
-
-// D1 Database (requires binding in wrangler.jsonc)
-handler: async (args, env) => {
-	const result = await env.DB.prepare('SELECT * FROM users').all();
-	// ...
-};
-
-// R2 Storage (requires binding in wrangler.jsonc)
-handler: async (args, env) => {
-	await env.MY_BUCKET.put('file.txt', 'content');
-	// ...
-};
-```
-
-To use these features, update your `wrangler.jsonc` with the appropriate bindings.
-
-## Advanced Configuration
-
-### Environment Variables
-
-You can add environment variables in two ways:
-
-#### Method 1: Using Wrangler CLI (Recommended for secrets)
-
-For sensitive data like API keys, use Wrangler secrets:
-
-```bash
-# Set a secret (will prompt for value)
-wrangler secret put API_KEY
-
-# Or set multiple secrets
-wrangler secret put API_KEY
-wrangler secret put DATABASE_URL
-```
-
-Secrets are encrypted and stored securely by Cloudflare. They are not visible in your code or configuration files.
-
-#### Method 2: Using wrangler.jsonc (For non-sensitive variables)
-
-For non-sensitive configuration values, you can add them directly to `wrangler.jsonc`:
-
-```jsonc
-{
-	"vars": {
-		"ENVIRONMENT": "production",
-		"API_TIMEOUT": "5000",
-		"MAX_RETRIES": "3"
-	}
-}
-```
-
-**Note**: Copy `wrangler.jsonc.example` to `wrangler.jsonc` and customize it for your local setup. The `wrangler.jsonc` file is gitignored to prevent committing sensitive data.
-
-#### Accessing Environment Variables in Code
-
-Both methods expose variables through the `env` parameter:
-
-```typescript
-handler: async (args, env) => {
-	const apiKey = env.API_KEY; // From wrangler secret
-	const environment = env.ENVIRONMENT; // From wrangler.jsonc vars
-	// ...
-};
-```
-
-### CORS Configuration
-
-By default, CORS allows all origins (`*`). To restrict:
-
-```typescript
-const corsHeaders = {
-	'Access-Control-Allow-Origin': 'https://yourdomain.com',
-	'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-	'Access-Control-Allow-Headers': 'Content-Type, Accept, X-API-Key, Authorization, Mcp-Session-Id, MCP-Protocol-Version',
-	'Access-Control-Expose-Headers': 'Mcp-Session-Id',
-};
-```
-
-### Custom Keep-Alive Interval
-
-Modify in CONFIG section:
-
-```typescript
-const CONFIG = {
-	keepAliveInterval: 60000, // 60 seconds instead of 30
-	...
-};
-```
-
-## Testing
-
-### Unit Tests
-
-Run tests:
-
-```bash
-npm test
-```
-
-The template includes Vitest with Cloudflare Workers test environment.
-
-### Integration Testing with TypingMind
-
-For testing your MCP server with TypingMind, see [TEST_PROMPT.md](./TEST_PROMPT.md) for a collection of test prompts that verify all your tools are working correctly. These prompts can be used directly in TypingMind to test your MCP server's functionality.
-
-### API Testing with Postman
-
-A Postman collection is included in the `postman/` directory for testing your MCP server locally and in production. See [postman/README.md](./postman/README.md) for setup and usage instructions.
-
-The collection includes:
-
-- Health check endpoint
-- MCP protocol messages (initialize, list tools, call tools)
-- Example requests for all default tools
-- Environment configurations for local and production
-- Support for API key authentication
+- **RankMath meta over REST depends on `show_in_rest`** being registered for `rank_math_title`/`rank_math_description`/`rank_math_focus_keyword` on that specific site. Confirmed working on at least one site in production; not guaranteed across all 54+.
+- **Redirects are out of scope** — RankMath/Yoast expose no REST redirect route; that's handled separately by `contractor-scale/skills/wordpress/scripts/wp-redirect.js` via the Redirection plugin.
+- First request to a given client's live site through a cold Worker isolate can take 10-25s (TLS/DNS through the Workers runtime) — a retry succeeds quickly. Not a bug, just latency to expect on the first call after a deploy.
 
 ## Troubleshooting
 
-### "Tool not found" error
+### "client 'X' has no token stored" / "auth_type='X'; only supports 'application_password'"
 
-- Ensure tool names match exactly (case-sensitive)
-- Check that tool is in the TOOLS array
-- Verify the tool is being exported in tools/list response
+The `wp_credentials` row for that slug either doesn't have an application password provisioned, or uses a different auth method. Provision one in WordPress: Users → Profile → Application Passwords.
 
-### SSE connection issues
+### ClickUp Brain's "Connect an MCP Server" spinner never finishes
 
-- Check CORS headers if connecting from a web app
-- Verify firewall isn't blocking SSE connections
-- Test with `curl -N http://localhost:8787/sse` to see raw SSE stream
+You're pointed at `/sse` instead of `/mcp`. See [Using with ClickUp Brain](#using-with-clickup-brain) above.
+
+### `wp_set_seo_meta` succeeds (HTTP 200) but the meta doesn't show up in RankMath
+
+That site likely doesn't have `show_in_rest` enabled for the RankMath meta keys. This is a per-site WordPress/plugin configuration issue, not a bug in this Worker.
 
 ### Deployment fails
 
-- Ensure you're logged in to Cloudflare: `wrangler login`
-- Check that worker name in wrangler.jsonc is unique
-- Verify your Cloudflare account has Workers enabled
+- `wrangler login` / confirm the right Cloudflare account (`isagani`, account ID `e9251afb5c2abd46a9504aa5d714aceb`) via `CLOUDFLARE_ACCOUNT_ID`
+- Confirm the worker name in `wrangler.jsonc` is `wordpress-mcp`
 
 ## Resources
 
 - [MCP Protocol Documentation](https://modelcontextprotocol.io/)
 - [Cloudflare Workers Docs](https://developers.cloudflare.com/workers/)
-- [TypingMind MCP Guide](https://docs.typingmind.com/)
-- [Server-Sent Events (SSE)](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+- [WordPress REST API Handbook](https://developer.wordpress.org/rest-api/)
+- Sibling MCPs in this fleet: `google-ads-mcp-cs`, `meta-ads-mcp-cs`, `gsc-mcp-cs`, `dataforseo-mcp-worker`
+- `contractor-scale/skills/wordpress/SKILL.md` — the Node-script equivalent of this Worker's credential/auth model, used by Donna/Paperclip
 
 ## License
 
-MIT
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
-
-## Support
-
-If you encounter issues:
-
-1. Check the Troubleshooting section above
-2. Review Cloudflare Workers logs: `wrangler tail`
-3. Open an issue on GitHub with:
-   - Your wrangler.jsonc (remove sensitive data)
-   - Error messages from logs
-   - Steps to reproduce
-
----
-
-Built with the Model Context Protocol (MCP) for TypingMind and other MCP clients.
+MIT (scaffolded from [`isaganiesteron/typingmind-mcp-cloudflare-starter`](https://github.com/isaganiesteron/typingmind-mcp-cloudflare-starter))
