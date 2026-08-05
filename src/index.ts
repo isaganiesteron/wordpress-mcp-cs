@@ -320,6 +320,12 @@ const TOOLS: Tool[] = [
 		},
 		handler: async (args, env) => {
 			const row = await resolveClient(requireArg(args, 'client'), env!);
+			if (row.seo_plugin !== 'rankmath') {
+				throw new Error(
+					`client '${row.client_slug}' uses seo_plugin='${row.seo_plugin || 'unknown'}', not RankMath. ` +
+						'This tool only writes rank_math_* meta keys and has no effect on Yoast or other SEO plugins.'
+				);
+			}
 			const postId = args.post_id;
 			if (!postId) throw new Error('Missing required argument: post_id');
 			const meta: Record<string, unknown> = {};
